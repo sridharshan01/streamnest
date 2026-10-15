@@ -37,11 +37,11 @@ export async function assertPublicHost(url: URL): Promise<void> {
 }
 
 /** Fetch with manual redirects; each hop is re-validated (SSRF-safe), with timeout. */
-export async function safeFetch(start: URL, init: RequestInit = {}, maxHops = 3): Promise<Response> {
+export async function safeFetch(start: URL, init: RequestInit = {}, maxHops = 3, timeoutMs = 8000): Promise<Response> {
   let url = start;
   for (let i = 0; i <= maxHops; i++) {
     await assertPublicHost(url);
-    const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(8000) });
+    const res = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       const next = parseUrl(new URL(res.headers.get("location")!, url).toString());
       if (!next.ok) throw new Error("UNSAFE_REDIRECT");

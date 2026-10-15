@@ -25,32 +25,69 @@ const detectOnly = (id: string, name: string, hosts: string[]): ProviderAdapter 
   },
 });
 
-const VIDEO_EXT = /\.(mp4|webm|m3u8|mov|m4v)$/i;
+const VIDEO_EXT = /\.(mp4|webm|m3u8|mov|m4v|ogv|ogg|avi|mkv)(?:$)/i;
 export const MAX_BYTES = 5 * 1024 ** 3;
 
+function isVideoPath(url: URL) { return VIDEO_EXT.test(url.pathname); }
+
+/**
+ * Direct-media adapter. It probes by HEAD first, then uses a one-byte Range GET
+ * because a number of legitimate file hosts do not implement HEAD correctly.
+ * It never downloads the entire file during analysis.
+ */
 export const directProvider: ProviderAdapter = {
   id: "direct", name: "Direct video URL", hosts: [], implemented: true,
-  canHandle: (u) => VIDEO_EXT.test(u.pathname),
+  // This is the fallback adapter. Known third-party providers are checked first.
+  canHandle: () => true,
   async analyze(url) {
     const base = { provider: "Direct video URL", originalUrl: url.toString() };
     let res: Response;
-    try { res = await safeFetch(url, { method: "HEAD" }); }
-    catch (e) {
+    try {
+      res = await safeFetch(url, { method: "HEAD" });
+      if (!res.ok || res.status === 405 || res.status === 501) {
+        try {
+          res = await safeFetch(url, { method: "GET", headers: { Range: "bytes=0-0" } });
+        } catch {
+          // Preserve the HEAD response below so auth/expired errors remain useful.
+        }
+      }
+    } catch (e) {
       const m = e instanceof Error ? e.message : "";
       return { ...base, status: "unavailable", message: m.startsWith("UNSAFE") ? "This address isn't allowed." : "Couldn't reach the link (timeout or network error)." };
     }
-    if (res.status === 401 || res.status === 403) return { ...base, status: "auth_required", message: "This file needs authorization. Open the original link instead." };
-    if (res.status === 404 || res.status === 410) return { ...base, status: "unavailable", message: "The link has expired or no longer exists." };
-    if (!res.ok) return { ...base, status: "unavailable", message: `The host answered with status ${res.status}.` };
+
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    const len = Number(res.headers.get("content-length")) || undefined;
+    const rawLength = Number(res.headers.get("content-length"));
+    const rangeTotal = res.headers.get("content-range")?.match(/\/([0-9]+)$/)?.[1];
+    const len = (rangeTotal ? Number(rangeTotal) : rawLength) || undefined;
+    if (res.status === 401 || res.status === 403) {
+      await res.body?.cancel().catch(() => undefined);
+      return { ...base, status: "auth_required", message: "This file requires access or authorization. Sign in to the original service if needed." };
+    }
+    if (res.status === 404 || res.status === 410) {
+      await res.body?.cancel().catch(() => undefined);
+      return { ...base, status: "unavailable", message: "The link has expired or no longer exists." };
+    }
+    if (!res.ok && res.status !== 206) {
+      await res.body?.cancel().catch(() => undefined);
+      return { ...base, status: "unavailable", message: `The host could not provide the file (HTTP ${res.status}).` };
+    }
+
     const isHls = /mpegurl/.test(type) || /\.m3u8$/i.test(url.pathname);
-    if (!isHls && !type.startsWith("video/")) return { ...base, status: "unavailable", message: `Not a video file (content type: ${type || "unknown"}).` };
-    if (len && len > MAX_BYTES) return { ...base, status: "unavailable", message: "File exceeds the size limit." };
-    const filename = decodeURIComponent(url.pathname.split("/").pop() || "video");
-    return { ...base, status: "ready", message: "Ready to play.", title: filename, format: isHls ? "HLS" : type, sizeBytes: len,
-      playback: { src: url.toString(), kind: isHls ? "hls" : "native" },
-      // HLS playlists are not a single downloadable file.
+    const isVideo = !type.includes("text/html") && !type.includes("application/xhtml") && (type.startsWith("video/") || isVideoPath(url) || isHls);
+    await res.body?.cancel().catch(() => undefined);
+    if (!isVideo) {
+      return { provider: "Web page or unsupported file", status: "detected_only", originalUrl: url.toString(),
+        message: "This link leads to a webpage or an unsupported file, not a directly accessible video stream. This hosting service needs a compatible integration or an authorized direct video URL." };
+    }
+    if (len && len > MAX_BYTES) return { ...base, status: "unavailable", message: "File exceeds the 5 GB limit." };
+
+    let filename = "video";
+    try { filename = decodeURIComponent(url.pathname.split("/").pop() || "video").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_"); } catch { /* keep safe default */ }
+    const playbackKind = isHls ? "hls" : "native";
+    return { ...base, status: "ready", message: "A direct video source was detected. Playback depends on the host allowing streaming from this server/browser.", title: filename, format: isHls ? "HLS" : (type || "video file"), sizeBytes: len,
+      playback: { src: url.toString(), kind: playbackKind },
+      // HLS playlists are not a single downloadable video file.
       download: isHls ? undefined : { src: url.toString(), filename } };
   },
 };

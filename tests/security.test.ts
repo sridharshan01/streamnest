@@ -8,5 +8,5 @@ describe("url validation", () => {
 });
 describe("provider detection", () => {
   const find = (u: string) => registry.find((p) => p.canHandle(new URL(u)))?.id;
-  it("detects", () => { expect(find("https://www.terabox.com/s/1abc")).toBe("terabox"); expect(find("https://x.com/a.mp4")).toBe("direct"); expect(find("https://x.com/page")).toBeUndefined(); });
+  it("detects known providers and falls back to direct-link analysis", () => { expect(find("https://www.terabox.com/s/1abc")).toBe("terabox"); expect(find("https://x.com/a.mp4")).toBe("direct"); expect(find("https://x.com/page")).toBe("direct"); });
 });

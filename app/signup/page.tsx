@@ -21,10 +21,15 @@ export default function Signup() {
     if (!f.terms) return setErr("Accept the terms and privacy policy to continue.");
     setBusy(true);
     try {
-      const a = await fetch(`/api/auth/username-available?u=${encodeURIComponent(f.username)}`).then((r) => r.json());
-      if (!a.available) return setErr("That username is taken.");
-      const { data, error } = await sb().auth.signUp({ email: f.email, password: f.password, options: { data: { username: f.username }, emailRedirectTo: `${location.origin}/login` } });
-      if (error) return setErr(error.message);
+      const checkRes = await fetch(`/api/auth/username-available?u=${encodeURIComponent(f.username.trim().toLowerCase())}`);
+      const a = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok) return setErr(a.message ?? "Username availability could not be checked. Please try again later.");
+      if (!a.available) return setErr("That username is already in use. Please choose another one.");
+      const { data, error } = await sb().auth.signUp({ email: f.email.trim(), password: f.password, options: { data: { username: f.username.trim().toLowerCase() }, emailRedirectTo: `${location.origin}/login` } });
+      if (error) {
+        if (/duplicate|profiles_username|username/i.test(error.message)) return setErr("That username may already be in use. Try another username, or check that the Supabase profile trigger is installed.");
+        return setErr(error.message);
+      }
       if (data.session) location.href = "/dashboard"; else setSent(true);
     } catch { setErr("Something went wrong. Check your connection and try again."); }
     finally { setBusy(false); }

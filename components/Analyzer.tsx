@@ -83,8 +83,9 @@ export default function Analyzer() {
           <p>{r.message}</p>
           {r.playback && <Player src={r.playback.src} kind={r.playback.kind} start={hist?.last_position_seconds ?? 0} onProgress={progress} />}
           <div className="row">
-            {r.download && <a className="btn" href={r.download.src} download={r.download.filename} target="_blank" rel="noopener noreferrer">Download video</a>}
-            <a className="btn ghost" href={r.originalUrl} target="_blank" rel="noopener noreferrer">Open original page</a>
+            {r.download && <a className="btn" href={`/api/download?url=${encodeURIComponent(r.download.src)}&filename=${encodeURIComponent(r.download.filename)}`}>Download video</a>}
+            {!r.playback && <a className="btn ghost" href={r.originalUrl} target="_blank" rel="noopener noreferrer">Open original page</a>}
+            {r.playback && <a className="btn ghost" href={r.originalUrl} target="_blank" rel="noopener noreferrer">Open source link</a>}
             {user ? <button className="ghost" onClick={save}>Save to library</button> : <Link className="btn ghost" href="/login">Sign in to save</Link>}
           </div>
         </article>
